@@ -1,4 +1,3 @@
-import copy
 import threading
 import time
 import random
@@ -37,7 +36,6 @@ uav_num = 1
 initial_position = [[0.0, 0.0], [-0.5, 0.5], [0.5, 0.5]]
 candidates_number = pm.candidates_number
 k_for_cal = pm.k_for_calculate
-times_csv = 'multi_times_2.csv'
 '''
 rssi_data_1 = queue.Queue()
 rssi_data_2 = queue.Queue()
@@ -163,7 +161,7 @@ def move(track_point, random_x, random_y):
 
 # 计算两点之间的距离
 def distance(point_1, point_2):
-    return math.sqrt((point_1[0] - point_2[0]) ** 2 + (point_1[1] - point_2[1]) ** 2)
+    return math.sqrt((point_1[0] - point_2[0] ** 2 + (point_1[1] - point_2[1]) ** 2))
 
 
 def calculate_candidate_point(other_locs, track_point, candidates_angle_list, time_next, step_dis, max_angle,
@@ -179,8 +177,6 @@ def calculate_candidate_point(other_locs, track_point, candidates_angle_list, ti
     loc_to_compute = []
     for i in range(uav_num):
         if i == uav_index:
-            continue
-        if not other_locs[i]:
             continue
         loc = other_locs[i]
         if d_min + 2 * step_dis < distance(loc, track_point) < d_max - 2 * step_dis:
@@ -200,33 +196,32 @@ def calculate_candidate_point(other_locs, track_point, candidates_angle_list, ti
     return candidate_point_result
 
 
-def track_test(track_point, uav_index, csv_index):
+def track_test(track_point, start_time, uav_index, csv_index):
     file_name = 'test' + str(uav_index)
-    csv_name = 'data/test1/multi_simulation_' + str(csv_index) + '_uav_' + str(uav_index) + '.csv'
+    csv_name = 'data/multi_simulation_' + str(csv_index) + '_uav_' + str(uav_index)
     global rssi_data_list, loc_data_list
     index = 0
-    time_track = 0.0
+    time_track = 0
     coordinate = queue.Queue()
     rssi_value = queue.Queue()
     recv_record = []  # 记录该无人机上次收到其他无人机的消息对应的迭代次数
     for i in range(uav_num):
         recv_record.append(-1)
     other_locs_last_index = []  # 维护其他无人机的位置信息，记录本次迭代开始之前无人机的位置
+    other_locs_desi = []  # 记录其他无人机当前轮次的计算结果，用于加入trainx，计算当前无人机下一步的位置
     for i in range(uav_num):
         loc_i = [initial_position[i][0], initial_position[i][1]]
         other_locs_last_index.append(loc_i)
         # other_locs_desi.append(loc_i)
     # print(coordinate.qsize())
-    distance = 12.5  # 对于动态源追踪的场景，要满足连续两次追踪无人机与信号源之间的距离小于阈值才认为追踪成功
-    source = copy.copy(source_point)
+    distance = 12.5
     f = open(file_name, 'a')
     print(uav_index, end='', file=f)
     print(' start-------------------------', file=f)
     while True:
         # TODO 更新两个other_locs列表
-        other_locs_desi = []  # 记录其他无人机当前轮次的计算结果，用于加入train_X，计算当前无人机下一步的位置
+        other_locs_last_index = other_locs_desi
         # 接收其他无人机发过来的数据
-
         while not rssi_data_list[uav_index].empty():
             data_recv = rssi_data_list[uav_index].get()
             coor_data = [data_recv[0], data_recv[1], data_recv[2]]
@@ -236,27 +231,23 @@ def track_test(track_point, uav_index, csv_index):
             recv_record[send_uav] = index
 
         # 先测量信号强度值并记录时间
-        # time_track += random.uniform(0.0, 1.0)
         rssi = get_rssi(track_point,
                             [source_point[0] + time_track * source_v_x, source_point[1] + time_track * source_v_y])
         # 将数据存入自己的队列中，并放入其他无人机的消息队列
-        if time_track != 0.0:
-            message_ = [track_point[0], track_point[1], time_track]
-            coordinate.put(message_)
-            rssi_value.put(rssi)
-
-            message = copy.copy(message_)
-            message.append(rssi)
-            message.append(uav_index)
-            for i in range(uav_num):
-                if i == uav_index:
-                    continue
-                else:
-                    rssi_data_list[i].put(message)
-
-        if time_track > 50:
+        message = [track_point[0], track_point[1], time_track]
+        coordinate.put(message)
+        rssi_value.put(rssi)
+        message.append(rssi)
+        message.append(uav_index)
+        for i in range(uav_num):
+            if i == uav_index:
+                continue
+            else:
+                rssi_data_list[i].put(message)
+        distance = 12.5  # 对于动态源追踪的场景，要满足连续两次追踪无人机与信号源之间的距离小于阈值才认为追踪成功
+        if time_track > 85:
             df = pd.DataFrame({"file_index": [csv_index], "fly_times": [index], "time_spent": time_track})
-            df.to_csv(times_csv, mode='a', index=None, header=None)
+            df.to_csv('opti_times_13.csv', mode='a', index=None, header=None)
             print("track failed.")
             return
         if index < 3:
@@ -272,67 +263,49 @@ def track_test(track_point, uav_index, csv_index):
                 track_point = move(track_point, random_x, random_y)
             else:
                 while loc_data_list[uav_index].empty():
-                    time.sleep(0.2)
+                    time.sleep(0.1)
                 random_move = loc_data_list[uav_index].get()
-                random_x = random_move[3]
-                random_y = random_move[4]
+                random_x = random_move[1]
+                random_y = random_move[2]
                 track_point = move(track_point, random_x, random_y)
-
-            time_track += random_distance / v_track
-            source[0] = source_point[0] + time_track * source_v_x
-            source[1] = source_point[1] + time_track * source_v_y
+            time.sleep(random_distance / v_track)
+            time_now = time.time() - start_time
+            source_point[0] = source_point[0] + time_now*source_v_x
+            source_point[1] = source_point[1] + time_now*source_v_y
             f = open(file_name, 'a')
             print('uav: %d, move to: ' % uav_index, end='', file=f)
             print(track_point, file=f)
             f.close()
             df = pd.DataFrame({"coordinate": [track_point], "max_rssi_pos": [track_point]
-                                  , "source_point": [source], "t": time_track, "rssi": rssi})
+                                  , "source_point": [source_point], "t": time_now, "rssi": rssi})
             df.to_csv(csv_name, mode='a', index=None, header=None)
         elif index < times_threshold_value:  # 探索阶段
             # 计算
             # 首先获取并处理其他无人机发过来的位置信息
             new_loc = []
-            time_track += distance_1 / v_track
-            for i in range(uav_num):
-                other_locs_desi.append([])
-            coor_change_list = []
             for k in range(0, k_for_cal):
+                for i in range(uav_num):
+                    other_locs_desi.append([])
                 # 定义一个list存储无人机接收到的其他无人机的位置变化信息
+                coor_change_list = []
                 flag_list = [False] * uav_num
                 cal_flag = False  # 是否开始计算，是否已经收到了需要的所有数据
                 while not cal_flag:
-                    # if uav_index == 2:
-                        # print('cal_flag==False')
-                    if uav_index > 0 or (uav_index == 0 and k > 0):
-                        back = []
-                        while not loc_data_list[uav_index].empty():
-                            # if uav_index == 2:
-                            #     print('queue not empty')
-                            loc_recv = loc_data_list[uav_index].get()
-                            if loc_recv[0] == 1 and loc_recv[1] == index:  # 判断数据是否是本次迭代的数据，不使用历史数据
+                    while not loc_data_list[uav_index].empty():
+                        loc_recv = loc_data_list[uav_index].get()
+                        if loc_recv[0] == 1 and loc_recv[1] >= index:  # 判断数据是否是本次迭代的数据，不使用历史数据
+                            coor_change_list.append(loc_recv[3:])
+                            other_locs_desi[loc_recv[2]] = loc_recv[3:]
+                            flag_list[loc_recv[2]] = True
+                            '''
+                            if loc_recv[2] < uav_index:
                                 coor_change_list.append(loc_recv[3:])
-                                other_locs_desi[loc_recv[2]] = loc_recv[3:]
                                 flag_list[loc_recv[2]] = True
-                                if len(coor_change_list) > uav_num - 1:
-                                    del coor_change_list[0]
-                                if uav_index == 2:
-                                    print('coor_change_list: ', end='')
-                                    print(coor_change_list)
-                                    print('flag_list', end='')
-                                    print(flag_list)
-                                '''
-                                if loc_recv[2] < uav_index:
-                                    coor_change_list.append(loc_recv[3:])
-                                    flag_list[loc_recv[2]] = True
-                                '''
-                            elif loc_recv[0] == 1 and loc_recv[1] > index:
-                                back.append(loc_recv)
-                        for b in back:  # 如果是后面轮次的数据，给他塞回去
-                            loc_data_list[uav_index].put(b)
+                            '''
                     # 判断是否收到应该收到的所有无人机的数据，收到之后开始计算
                     recv_num = 0
                     if k == 0:
-                        for i in range(uav_index):
+                        for i in range(uav_index - 1):
                             if flag_list[i]:
                                 recv_num += 1
                     else:
@@ -340,87 +313,58 @@ def track_test(track_point, uav_index, csv_index):
                             if flag_list[i]:
                                 recv_num += 1
 
-                    if k == 0 and recv_num == uav_index:
+                    if k == 0 and recv_num == uav_index - 1:
                         cal_flag = True
                     elif k > 0 and recv_num == uav_num - 1:
                         cal_flag = True
                     else:
                         time.sleep(0.2)
-                        # time_track += 0.2
 
                 # 可以开始计算,调用ALC函数
-                # time_track += 0.1
+                time_track = time.time() - start_time + distance_1/v_track
                 max_cordinate_predicted, max_rssi_predicted, kff_inv, mu, cov = get_max_point(time_track, coordinate,
                                                                                               rssi_value)
                 max_angle = calculate_angle(track_point[0], track_point[1], max_cordinate_predicted[0],
                                             max_cordinate_predicted[1])
                 ad = ads.ADS(list(coordinate.queue), list(rssi_value.queue))
                 candidates_angle_list = ad.calculate_candidates_points_angle()
-                candidate_point_list = calculate_candidate_point(other_locs_desi, track_point, candidates_angle_list,
+                candidate_point_list = calculate_candidate_point(coor_change_list, track_point, candidates_angle_list,
                                                                  time_track,
                                                                  distance_1, max_angle, uav_index)
-                print('uav_index: cal_index: k_index: candidate_num:', end='')
-                print(uav_index, end=': ')
-                print(index, end=': ')
-                print(k, end=': ')
-                print(len(candidate_point_list))
-                # 如果筛选完之后候选点数量为0，则保持当前位置不动
-                new_loc = track_point
-                if candidate_point_list:
-                    # 在coordinate上添加上已经计算过的其他无人机的预计目标位置作为ALC的输入train_x
-                    train_X = list(coordinate.queue)
-                    train_X.extend(coor_change_list)
-                    point_index = ad.ALC(train_X, candidate_point_list, time_track, cov)
-                    new_loc = candidate_point_list[point_index]
-
+                # 在coordinate上添加上已经计算过的其他无人机的预计目标位置作为ALC的输入train_x
+                train_X = coordinate
+                train_X.extend(coor_change_list)
+                index = ad.ALC(train_X, candidate_point_list, kff_inv, time_track, cov)
                 # 向其他无人机发送信息,广播所有已有数据
+                new_loc = candidate_point_list[index]
                 other_locs_desi[uav_index] = new_loc
-                for i in range(uav_num):
-                    if i == uav_index:
-                        continue
-                    # print('before uav_index: cal_index: k_index: loc_data_list[i]: size', end='')
-                    # print(uav_index, end=': ')
-                    # print(index, end=': ')
-                    # print(k, end=': ')
-                    # print(i, end=': ')
-                    # print(loc_data_list[i].qsize())
-                    loc_data_list[i].put([1, index, uav_index, new_loc[0], new_loc[1], time_track])
-                    # print('after uav_index: cal_index: k_index: loc_data_list[i]: size', end='')
-                    # print(uav_index, end=': ')
-                    # print(index, end=': ')
-                    # print(k, end=': ')
-                    # print(i, end=': ')
-                    # print(loc_data_list[i].qsize())
-                '''
                 for l in other_locs_desi:
-                    if len(l) == 0:
+                    if len(l)==0:
                         continue
-                    for i in range(uav_num):
-                        if i == uav_index:
-                            continue
-                        loc_data_list[i].put([1, index, uav_index, l[0], l[1], time_track])
-                '''
+                    for i in range(1, uav_num):
+                        loc_data_list[i].put(
+                            [0, index, uav_index, new_loc[0], new_loc[1], time_track + distance_1 / v_track])
             # 真正的飞行应发生在外面一层，需要存储位置的计算结果，并且在发送给其他无人机前就要判断目标位置是否合理
             track_point = move(track_point, new_loc[0]-track_point[0], new_loc[1]-track_point[1])
-            source[0] = source_point[0] + time_track * source_v_x
-            source[1] = source_point[1] + time_track * source_v_y
+            time_now = time.time() - start_time
+            source_point[0] = source_point[0] + time_now * source_v_x
+            source_point[1] = source_point[1] + time_now * source_v_y
             df = pd.DataFrame({"coordinate": [track_point], "max_rssi_pos": [max_cordinate_predicted]
-                                  , "source_point": [source], "t": time_track, "rssi": rssi})
+                                  , "source_point": [source_point], "t": time_now, "rssi": rssi})
             df.to_csv(csv_name, mode='a', index=None, header=None)
-            distance_x_this = abs(source[0] - track_point[0])
-            distance_y_this = abs(source[1] - track_point[1])
+            distance_x_this = abs(source_point[0] - track_point[0])
+            distance_y_this = abs(source_point[1] - track_point[1])
             distance_this_2 = distance_x_this ** 2 + distance_y_this ** 2
             if distance_this_2 <= threshold_distance and distance <= threshold_distance:
                 df = pd.DataFrame({"file_index": [csv_index], "fly_times": [index], "time_spent": time_track})
-                df.to_csv(times_csv, mode='a', index=None, header=None)
-                print("track succeed!")
+                df.to_csv('opti_times_8.csv', mode='a', index=None, header=None)
+                "track succeed!"
                 return
             distance = distance_this_2
 
         else:
             # TODO 根据other_locs_last_index内的数据计算哪架无人机距离信号源最近
             # 利用阶段，直接向信号源飞行
-            time_track += distance_2 / v_track
             max_cordinate_predicted, max_rssi_predicted, kff_inv, mu, cov = get_max_point(time_track, coordinate,
                                                                                           rssi_value)
             largest_x = max_cordinate_predicted[0]
@@ -433,37 +377,38 @@ def track_test(track_point, uav_index, csv_index):
 
             track_point = move(track_point, delta_x, delta_y)
             # 判断距离
-            source[0] = source_point[0] + time_track * source_v_x
-            source[1] = source_point[1] + time_track * source_v_y
-            df = pd.DataFrame({"coordinate": [track_point], "max_rssi_pos": [max_cordinate_predicted]
-                                  , "source_point": [source], "t": time_track, "rssi": rssi})
+
+            time_now = time.time() - start_time
+            source_point[0] = source_point[0] + time_now * source_v_x
+            source_point[1] = source_point[1] + time_now * source_v_y
+            df = pd.DataFrame({"coordinate": [track_point], "max_rssi_pos": [track_point]
+                                  , "source_point": [source_point], "t": time_now, "rssi": rssi})
             df.to_csv(csv_name, mode='a', index=None, header=None)
-            distance_x_this = abs(source[0] - track_point[0])
-            distance_y_this = abs(source[1] - track_point[1])
+            distance_x_this = abs(source_point[0] - track_point[0])
+            distance_y_this = abs(source_point[1] - track_point[1])
             distance_this_2 = distance_x_this ** 2 + distance_y_this ** 2
             if distance_this_2 <= threshold_distance and distance <= threshold_distance:
                 df = pd.DataFrame({"file_index": [csv_index], "fly_times": [index], "time_spent": time_track})
-                df.to_csv(times_csv, mode='a', index=None, header=None)
-                print("track succeed!")
+                df.to_csv('opti_times_8.csv', mode='a', index=None, header=None)
+                "track succeed!"
                 return
             distance = distance_this_2
-        other_locs_last_index = other_locs_desi
         index += 1
 
 
 if __name__ == '__main__':
     init_rssi()
     for i in range(uav_num):
-        rssi_data_list.append(queue.Queue(10))
-        loc_data_list.append(queue.Queue(10))
+        rssi_data_list.append(queue.Queue())
+        loc_data_list.append(queue.Queue())
+    start_time = time.time()
     thread_list = []
-    record_index = 3
-    t1 = threading.Thread(target=track_test, args=([0.0, 0.0], 0, record_index))
-    t2 = threading.Thread(target=track_test, args=([0.5, 0.5], 1, record_index))
-    t3 = threading.Thread(target=track_test, args=([-0.5, -0.5], 2, record_index))
+    t1 = threading.Thread(target=track_test, args=([0.0, 0.0], start_time, 0, 1))
+    # t2 = threading.Thread(target=track_test, args=([0.5, 0.5], start_time, 1, 1))
+    # t3 = threading.Thread(target=track_test, args=([-0.5, -0.5], start_time, 2, 1))
     thread_list.append(t1)
-    thread_list.append(t2)
-    thread_list.append(t3)
+    # thread_list.append(t2)
+    # thread_list.append(t3)
     for i in range(uav_num):
         thread_list[i].start()
     for i in range(uav_num):

@@ -30,6 +30,7 @@ rssi_distribution_list = []  # 所有点对应的信号强度值的list
 # coordinate_3 = queue.Queue()  # 坐标和时间队列，作为高斯过程的输入
 # rssi_value_3 = queue.Queue()  # 信号强度值队列，与坐标和时间队列为一一对应的关系
 times_threshold_value = pm.time_to_target  # 两个阶段划分的阈值
+k_for_cal = pm.k_for_calculate
 
 class Drone:
     def __init__(self, x, y):
@@ -241,7 +242,8 @@ def track(csv_index):
                 d = distance_1
             else:
                 d = distance_2
-
+            '''
+            
             time_track += d / v_track
             # 高斯过程
             max_cordinate_predicted, max_rssi_predicted, kff_inv, mu, cov = get_max_point(time_track)

@@ -36,10 +36,10 @@ class ADS:
     # 根据候选点的数量计算出候选点的角度列表
     def calculate_candidates_points_angle(self):
         candidates_angle_list = []
-        random_angel = random.uniform(0.0, math.pi / 6)
+        random_angel = random.uniform(0.0, math.pi / 12)
         for i in range(0, self.candidates_number):
-            candidates_angle_list.append(math.pi * i/2.0 + random_angel)
-            candidates_angle_list.append(math.pi * i / 2.0)
+            candidates_angle_list.append(math.pi * 2.0 / self.candidates_number * i + random_angel)
+            # candidates_angle_list.append(math.pi * i / 2.0)
         return candidates_angle_list
 
     # 计算出当前位置的候选节点列表
@@ -60,7 +60,7 @@ class ADS:
     step_dis: 飞行步长
     max_angle: 预测出的最强位置与当前位置的方向角
     '''
-    def next_step(self, calculate_times, current_position, Kff_inv, time_track, train_X, train_y, mu, cov, step_dis, max_angle):
+    def next_step(self, calculate_times, current_position, Kff_inv, time_track, train_X, cov, step_dis, max_angle):
         candidates_angle_list = self.calculate_candidates_points_angle()
         candidates_list = self.calculate_candidates_points(current_position, candidates_angle_list, time_track, step_dis)
         print('#########', end='')
@@ -91,13 +91,15 @@ class ADS:
         return reference_points_list
 
     def get_index(self, point):
-        x = (point[0]-self.left_boundary)/0.1
-        y = (point[1]-self.left_boundary)/0.1
-        return [x,y]
+        x = round((point[0]-self.left_boundary)/0.1)
+        y = round((point[1]-self.left_boundary)/0.1)
+        return [x, y]
 
     # 返回值为ALC方差最大的候选点的索引
-    def ALC(self, train_X, candidates_list, Kff_inv, time_track, cov):
+    def ALC(self, train_X, candidates_list, time_track, cov):
         gpr = gp.GPR(optimize=True)
+        Kff = gpr.kernel(train_X, train_X)
+        Kff_inv = np.linalg.inv(Kff + 1e-8 * np.eye(len(train_X)))
         # 参考点列表
         reference_points_list = self.get_reference_points_list(time_track)
         # 候选点列表
@@ -112,6 +114,8 @@ class ADS:
             candidate = candidates_list[i]
             index_c = self.get_index(candidate)
             sigma_2_xc = cov[index_c[0], index_c[1]]
+            # print('-------sigma_x_xc------', end='')
+            # print(sigma_2_xc)
             m = []  # the N-vector of covariances between the present training data points and the query candidate
             for j in range(0, train_data_num):
                 train_data = train_X[j]
@@ -126,8 +130,10 @@ class ADS:
             for j in range(0, len(reference_points_list)):
                 k_N = []  # the vector of covariances between the training data and a reference data point
                 reference_point = reference_points_list[j]
+                '''
                 index_r = self.get_index(reference_point)
                 sigma_2_xr = cov[index_r[0], cov[index_r[1]]]
+                '''
                 '''
                 for k in range(0, train_data_num):
                     train_data = train_X[k]
@@ -148,8 +154,8 @@ class ADS:
                 k_xc_X = gpr.kernel(candidate, train_X)
                 k_X_xr = gpr.kernel(train_X, reference_point)
                 cov_x_x_star = k_xc_xr - np.dot(np.dot(k_xc_X, Kff_inv), k_X_xr)
-                ALC_list[i] = ALC_list[i] + sigma_2_xr * cov_x_x_star
-            ALC_list[i] = sigma_2_xc*ALC_list[i]
+                ALC_list[i] = ALC_list[i] + cov_x_x_star * cov_x_x_star
+            ALC_list[i] = 1/sigma_2_xc*ALC_list[i]
         max_ALC = ALC_list[0]
         max_ALC_index = 0
         for i in range(0, len(ALC_list)):
